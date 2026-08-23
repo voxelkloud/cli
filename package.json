@@ -1,0 +1,53 @@
+{
+  "name": "voxelkloud",
+  "version": "0.1.0",
+  "description": "The voxelkloud CLI \u2014 inspect, diagnose, serve and convert point clouds. Also the signpost to the scoped browser packages.",
+  "license": "MIT",
+  "keywords": [
+    "point-cloud",
+    "lidar",
+    "las",
+    "laz",
+    "copc",
+    "potree",
+    "ept",
+    "cli",
+    "converter",
+    "webgpu"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voxelkloud/cli.git"
+  },
+  "homepage": "https://github.com/voxelkloud/voxelkloud",
+  "bugs": {
+    "url": "https://github.com/voxelkloud/voxelkloud/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "bin",
+    "index.js"
+  ],
+  "bin": {
+    "voxelkloud": "./bin/voxelkloud.mjs"
+  },
+  "optionalDependencies": {
+    "@voxelkloud/cli-darwin-arm64": "0.1.0",
+    "@voxelkloud/cli-darwin-x64": "0.1.0",
+    "@voxelkloud/cli-linux-arm64": "0.1.0",
+    "@voxelkloud/cli-linux-x64": "0.1.0",
+    "@voxelkloud/cli-win32-x64": "0.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build:platforms": "node scripts/build-platforms.mjs"
+  }
+}
