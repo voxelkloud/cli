@@ -1,6 +1,6 @@
 {
   "name": "voxelkloud",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The voxelkloud CLI \u2014 inspect, diagnose, serve and convert point clouds. Also the signpost to the scoped browser packages.",
   "license": "MIT",
   "keywords": [
