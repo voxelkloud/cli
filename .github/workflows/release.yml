@@ -158,15 +158,32 @@ jobs:
           # signs against a PUBLIC source repository, and refused outright — 422,
           # "Unsupported GitHub Actions source repository visibility" — while
           # this built from the private monorepo.
+          # SKIP a version already on the registry rather than dying on it, for
+          # the reason the crates job learned first: npm refuses to overwrite, so
+          # a run that published every package and then failed on the formula
+          # cannot be re-run — the retry dies on the packages it already got
+          # right. Which is exactly what happened to 0.5.2.
           for dir in npm/cli-*; do
-            npm publish "./$dir" --access public --provenance
+            name=$(node -pe 'require("./'"$dir"'/package.json").name')
+            ver=$(node -pe 'require("./'"$dir"'/package.json").version')
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "$name@$ver is already published — skipping"
+            else
+              npm publish "./$dir" --access public --provenance
+            fi
           done
 
       - name: Publish the launcher
         if: startsWith(github.ref, 'refs/tags/cli-v') || inputs.publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish ./npm/voxelkloud --access public --provenance
+        run: |
+          ver=$(node -pe 'require("./npm/voxelkloud/package.json").version')
+          if npm view "voxelkloud@$ver" version >/dev/null 2>&1; then
+            echo "voxelkloud@$ver is already published — skipping"
+          else
+            npm publish ./npm/voxelkloud --access public --provenance
+          fi
 
       # Static binaries for people who want neither npm nor cargo: a curl, a
       # tar, and a checksum they can check.
