@@ -1,0 +1,236 @@
+# Build the CLI for five platforms and publish it three ways.
+#
+# Triggered by a `cli-v*` tag. The tag carries the version — it is not read from
+# a manifest — so a release is one deliberate act and a version bump on `main`
+# publishes nothing on its own.
+#
+# The order at the end matters: every platform package goes to npm BEFORE the
+# launcher that depends on them. Publishing the launcher first leaves a window,
+# minutes wide, where `npx voxelkloud@latest` resolves a package whose optional
+# dependencies do not exist and falls through to "no prebuilt binary".
+name: release-cli
+
+on:
+  push:
+    tags: ["cli-v*"]
+  # Buildable on demand without publishing, which is the only way to find out
+  # that a cross-compile broke before a tag makes it public.
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to npm and crates.io"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  # npm provenance signs the package against this workflow run. It is what lets
+  # somebody verify that the binary on npm came from this repository.
+  id-token: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            # CROSS-COMPILED from Apple Silicon, because `macos-13` — the Intel
+            # image — has been retired: the job does not fail on it, it queues
+            # forever with no runner ever assigned. Xcode ships both SDKs, so
+            # `rustup target add` is all the cross needs.
+            runner: macos-14
+          # musl, statically linked: one Linux artefact that runs on Debian,
+          # Alpine and a distroless container alike, with no glibc version to
+          # be wrong about.
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: endsWith(matrix.target, '-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        working-directory: crates
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # The binary has to actually run on the machine that built it: a
+      # cross-compile that links against the wrong libc produces a file that
+      # only fails on a user's machine.
+      #
+      # Which is exactly the coverage x86_64 macOS LOSES here. With the Intel
+      # image retired that binary is now cross-compiled from ARM, and GitHub's
+      # ARM macOS images ship without Rosetta, so the runner cannot exec it.
+      # Skipping is honest; pretending would be worse. It is the one target
+      # whose binary reaches users unexecuted, and it wants a real Mac before a
+      # release goes out.
+      - name: Smoke test
+        if: >-
+          (startsWith(matrix.target, 'x86_64') && runner.arch == 'X64') ||
+          (startsWith(matrix.target, 'aarch64') && runner.arch == 'ARM64')
+        working-directory: crates
+        run: |
+          ./target/${{ matrix.target }}/release/voxelkloud${{ runner.os == 'Windows' && '.exe' || '' }} --version
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: crates/target/${{ matrix.target }}/release/voxelkloud${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/cli-v') || inputs.publish
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # FAIL HERE, not eleven steps later. An empty or invalid token does not
+      # announce itself until the first `npm publish`, which is after five
+      # platform binaries have been built and the packages assembled — and by
+      # then a partial release may already be on the registry. `whoami` costs a
+      # second and answers the only question that matters before publishing:
+      # can this token speak to npm at all.
+      - name: The npm token has to work
+        if: startsWith(github.ref, 'refs/tags/cli-v') || inputs.publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN is empty. Set it on this repository."
+            exit 1
+          fi
+          echo "publishing to npm as $(npm whoami)"
+
+      - name: Version from the tag
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/cli-v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/cli-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assemble the npm packages
+        run: node scripts/build-platforms.mjs
+          --artifacts ${{ github.workspace }}/artifacts
+          --out ${{ github.workspace }}/npm
+          --version ${{ steps.version.outputs.value }}
+
+      - name: Publish the platform packages
+        if: startsWith(github.ref, 'refs/tags/cli-v') || inputs.publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `./$dir`, not `$dir`. A bare `npm/cli-darwin-arm64` is npm's GITHUB
+          # SHORTHAND, so publish went looking for a repository of that name over
+          # ssh and failed on a public key rather than on anything to do with
+          # this release. A leading `./` is what makes it a directory.
+          # `./$dir`, not `$dir`. A bare `npm/cli-darwin-arm64` is npm's GITHUB
+          # SHORTHAND, so publish goes looking for a repository of that name over
+          # ssh and fails on a public key. A leading `./` makes it a directory.
+          #
+          # `--provenance` is back, and it is why the Rust source moved here: npm
+          # signs against a PUBLIC source repository, and refused outright — 422,
+          # "Unsupported GitHub Actions source repository visibility" — while
+          # this built from the private monorepo.
+          for dir in npm/cli-*; do
+            npm publish "./$dir" --access public --provenance
+          done
+
+      - name: Publish the launcher
+        if: startsWith(github.ref, 'refs/tags/cli-v') || inputs.publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./npm/voxelkloud --access public --provenance
+
+      # Static binaries for people who want neither npm nor cargo: a curl, a
+      # tar, and a checksum they can check.
+      - name: Package the standalone binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          version="${{ steps.version.outputs.value }}"
+          for dir in artifacts/*/; do
+            target="$(basename "$dir")"
+            if [ -f "$dir/voxelkloud.exe" ]; then
+              (cd "$dir" && zip -q "$GITHUB_WORKSPACE/dist/voxelkloud-$version-$target.zip" voxelkloud.exe)
+            else
+              chmod +x "$dir/voxelkloud"
+              tar -czf "dist/voxelkloud-$version-$target.tar.gz" -C "$dir" voxelkloud
+            fi
+          done
+          (cd dist && shasum -a 256 * > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Homebrew formula
+        run: node scripts/homebrew-formula.mjs
+          --version ${{ steps.version.outputs.value }}
+          --dist dist
+          --out dist/voxelkloud.rb
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/cli-v')
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  crates:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/cli-v')
+    steps:
+      - uses: actions/checkout@v4
+      # The library first: `voxelkloud-cli` depends on it by version, and
+      # crates.io refuses a package whose dependency it has never seen.
+      # SKIP a version already on crates.io rather than failing on it.
+      #
+      # crates.io refuses to overwrite, so `cargo publish` on an existing
+      # version is a hard error — and that makes a release un-retryable exactly
+      # when retrying matters. A run that published npm and then failed on
+      # homebrew cannot be re-run, because the second attempt dies here on the
+      # crate it already got right. It also handles a library published by hand
+      # ahead of its release, which is how `voxelkloud-io` 0.5.1 got out.
+      - name: Publish the crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The library first: `voxelkloud-cli` depends on it by version, and
+          # crates.io refuses a package whose dependency it has never seen.
+          for crate in voxelkloud-io voxelkloud-cli; do
+            ver=$(cargo metadata --no-deps --format-version 1 \
+                    --manifest-path "crates/$crate/Cargo.toml" \
+                  | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).packages[0].version')
+            if curl -sfL -o /dev/null -A voxelkloud-release \
+                 "https://crates.io/api/v1/crates/$crate/$ver"; then
+              echo "$crate $ver is already on crates.io — skipping"
+            else
+              echo "publishing $crate $ver"
+              (cd "crates/$crate" && cargo publish --locked)
+            fi
+          done

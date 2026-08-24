@@ -1,0 +1,27 @@
+# The native toolchain: a library and the CLI built on it.
+#
+# A workspace of its own rather than a root manifest, because the three wasm
+# crates under `packages/` are npm packages that happen to be written in Rust —
+# they are built by `pnpm --filter ... build`, carry their own lockfiles, and
+# have nothing to say to `cargo build` at the repo root. These two are the
+# opposite: Rust first, with npm as one of several ways they are distributed.
+[workspace]
+resolver = "2"
+members = ["voxelkloud-io", "voxelkloud-cli"]
+
+[workspace.package]
+version = "0.5.1"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/voxelkloud/voxelkloud"
+homepage = "https://github.com/voxelkloud/voxelkloud"
+
+[workspace.dependencies]
+voxelkloud-io = { path = "voxelkloud-io", version = "0.5.1" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

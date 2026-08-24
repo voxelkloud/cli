@@ -1,0 +1,54 @@
+[package]
+name = "voxelkloud-io"
+description = "Read and write point cloud formats: Potree v2, COPC, EPT and LAS/LAZ, through one neutral vocabulary. The library half of the voxelkloud toolchain."
+keywords = ["point-cloud", "lidar", "las", "copc", "potree"]
+categories = ["science::geo", "encoding"]
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[features]
+# Everything a CLI wants. A consumer that only needs LAS framing — the wasm
+# codec package does — takes `default-features = false` and pays for nothing
+# else: the `las` module has no dependencies at all.
+default = ["formats", "laz", "e57"]
+# The manifest-shaped formats. Potree v2 and EPT describe themselves in JSON;
+# COPC does not, but sniffing a directory means looking for the other two.
+formats = ["dep:serde", "dep:serde_json", "dep:brotli"]
+# Point record compression. Pulls laz-rs, which is the single largest
+# dependency here and useless to a consumer that only reads manifests.
+laz = ["dep:laz"]
+# E57, the terrestrial scanner exchange format. One dependency, pure Rust, and
+# it compiles to wasm32 — which is what lets the browser tier read the same
+# files the CLI converts instead of a second decoder written for the tab.
+e57 = ["dep:e57"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+# The same laz-rs, at the same version, that `@voxelkloud/wasm-codecs` compiles
+# to wasm. One codec, two build targets: a difference between what the CLI
+# writes and what the browser reads would be a difference nobody could debug.
+laz = { version = "0.13", default-features = false, optional = true }
+
+# Potree v2's second encoding. Pure Rust, and the encoder half is the reason
+# the converter can produce every dataset this repo describes without the
+# reference toolchain.
+brotli = { version = "8", default-features = false, features = ["std"], optional = true }
+
+# E57 decoding: the XML section, the CRC'd paging and the bitpacked records.
+# `forbid(unsafe_code)`, and its only dependency is an XML parser. The optional
+# `crc32c` feature is deliberately NOT enabled: it swaps the table-driven CRC
+# for a SIMD one, which is a hardware claim this crate does not otherwise make
+# and buys nothing on the wasm target the same code has to reach.
+e57 = { version = "0.11", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+# The fixtures for `tests/e57.rs`: the same crate that reads them writes them,
+# which is what makes the suite run on a clone with no network.
+e57 = "0.11"

@@ -1,0 +1,30 @@
+[package]
+name = "voxelkloud-cli"
+description = "The voxelkloud CLI: inspect, diagnose, serve and convert point clouds."
+keywords = ["point-cloud", "lidar", "las", "copc", "potree"]
+categories = ["command-line-utilities", "science::geo"]
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+# `cargo install voxelkloud-cli` puts `voxelkloud` on the PATH. The crate is
+# named for what it is; the binary is named for what you type.
+[[bin]]
+name = "voxelkloud"
+path = "src/main.rs"
+
+[dependencies]
+voxelkloud-io.workspace = true
+clap = { version = "4", features = ["derive", "wrap_help"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Thumbnail encoding for `snapshot`. Pure Rust, no system libraries.
+png = "0.17"
+# Blocking HTTP with rustls. No async runtime, because every request this makes
+# is one a human is waiting on, and no OpenSSL, because the release binaries are
+# static and cross-compiled.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
