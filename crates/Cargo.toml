@@ -10,7 +10,7 @@ resolver = "2"
 members = ["voxelkloud-io", "voxelkloud-cli"]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
@@ -18,7 +18,7 @@ repository = "https://github.com/voxelkloud/voxelkloud"
 homepage = "https://github.com/voxelkloud/voxelkloud"
 
 [workspace.dependencies]
-voxelkloud-io = { path = "voxelkloud-io", version = "0.5.1" }
+voxelkloud-io = { path = "voxelkloud-io", version = "0.5.2" }
 
 [profile.release]
 opt-level = 3
